@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duel Quest</title>
+<!--
+DGD Q2 BG 01 RUBRIC NOTES
+1) Explain the game rules: the Rules panel below explains turns, spaces, battle actions,
+   allies, and the win condition in player-friendly language.
+2) Draw the screen and list six needs: the screen contains the game mode/start controls,
+   rules panel, Team Status, Adventure Board, turn/status controls, Battle panel, and
+   Adventure Log. Six core player needs are: choose a mode, read rules, see team stats,
+   see board positions, roll/move on a turn, and take battle actions/view event feedback.
+3) Build the board and one move: renderBoard() draws the spaces and player tokens;
+   takeTurn() rolls and visibly moves the current player before resolving the space.
+4) Run three tests: see the TEST PLAN comments near the end of this script.
+5) Explain AI help and code: add an AI-use note in the project submission describing
+   which suggestions were used, what was checked, and any changes made by the student.
+
+DATA STORAGE AND CHANGES:
+- Live game data is stored in JavaScript variables in the browser's memory while the page
+  is open. The game does not save progress to a database, file, or browser storage.
+- `spaces`, `positions`, and `roster` are setup data: board types, screen coordinates,
+  and possible allies. The code reads these values to build and run the game.
+- `players` stores the current player objects: position, HP, coins, attack, allies, and
+  defend state. `turn`, `busy`, `gameOver`, and `battle` track the current game phase.
+- `startGame()` creates/resets player data. `takeTurn()` changes positions and rewards.
+  `battleAction()` and `damagePlayer()` change battle state and HP. `nextTurn()` switches turns.
+- `render()`, `renderBoard()`, and `renderBattle()` display the current state on screen.
+  They show the data; the JavaScript variables and player objects hold the live values.
+- Reloading the page or starting a new game resets the live game state. The rules panel
+  only changes its visibility and button label; it does not change player stats or progress.
+-->
+<style>
+body {
+  margin: 0;
+  padding: 20px;
+  background: #141a35;
+  color: white;
+  font-family: Arial, sans-serif;
+  text-align: center;
+}
+h1 { color: #ffd166; }
+button, select {
+  padding: 12px;
+  margin: 5px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+}
+button { background: #ffd166; font-weight: bold; }
+.panel {
+  max-width: 800px;
+  margin: 16px auto;
+  padding: 16px;
+  background: #252f54;
+  border-radius: 14px;
+}
+#board {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+.space {
+  min-height: 65px;
+  background: #3a4a78;
+  border: 2px solid #7185b9;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 12px;
+}
+.coin { background: #665128; }
+.partner { background: #245e56; }
+.duel { background: #713c5b; }
+.center {
+  grid-column: 2 / 5;
+  grid-row: 2 / 4;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: #19213e;
+  border-radius: 12px;
+  padding: 8px;
+}
+.token { font-size: 19px; }
+#stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+.player {
+  flex: 1;
+  min-width: 210px;
+  background: #151d38;
+  border-radius: 10px;
+  padding: 10px;
+}
+#battle { display: none; }
+#status { line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<h1>⚔ DUEL QUEST ⚔</h1>
+<p>Roll • Explore • Recruit • Battle</p>
+
+<div class="panel">
+  <h2>New Adventure</h2>
+  <select id="mode">
+    <option value="cpu">1 Player vs CPU</option>
+    <option value="local">2 Local Players</option>
+  </select>
+  <button onclick="startGame()">Start Game</button>
+  <button type="button" onclick="toggleRules()" aria-expanded="false" id="rulesButton">📜 How to Play / Rules</button>
+</div>
+
+<div class="panel" id="rulesPanel" style="display:none; text-align:left;" aria-labelledby="rulesTitle">
+  <h2 id="rulesTitle" style="text-align:center;">📜 Duel Quest Rules</h2>
+  <p><strong>Goal:</strong> Defeat your rival in a duel to win the game.</p>
+  <ol>
+    <li><strong>Choose a mode:</strong> Play against the CPU or with two local players, then select <em>Start Game</em>.</li>
+    <li><strong>Take turns:</strong> On your turn, select <em>Roll Dice &amp; Move</em>. You move forward 1–6 spaces around the board.</li>
+    <li><strong>🪙 Coin spaces:</strong> Collect 3–6 coins.</li>
+    <li><strong>🤝 Partner spaces:</strong> Recruit a random ally, up to 3 allies. If your team is full, receive 5 coins instead.</li>
+    <li><strong>⚔️ Duel spaces:</strong> Receive 2 coins.</li>
+    <li><strong>Meet your rival:</strong> If both players land on the same space, a duel begins.</li>
+    <li><strong>Battle actions:</strong> The active fighter chooses <em>Attack</em> to deal damage or <em>Defend</em> to reduce the next incoming hit. Turns alternate between fighters.</li>
+    <li><strong>Allies in battle:</strong> Your team’s attack power is added to your leader’s attack. Incoming damage hits allies first; defeated allies are removed from your team.</li>
+    <li><strong>Win:</strong> Reduce your rival leader’s HP to 0. Start a new game to play again.</li>
+  </ol>
+  <p><strong>Tip:</strong> Check Team Status to see your HP, coins, attack power, and recruited partners.</p>
+</div>
+
+<div class="panel">
+  <h2>Team Status</h2>
+  <div id="stats"></div>
+</div>
+
+<div class="panel">
+  <h2>Adventure Board</h2>
+  <div id="board"></div>
+</div>
+
+<div class="panel">
+  <h2 id="turnTitle">Player 1's Turn</h2>
+  <p id="status">Welcome to Duel Quest!</p>
+  <button id="roll" onclick="takeTurn()">🎲 Roll Dice & Move</button>
+</div>
+
+<div class="panel" id="battle">
+  <h2>⚔ Duel Battle!</h2>
+  <div id="arena"></div>
+  <p id="battleStatus"></p>
+  <button id="attack" onclick="battleAction('attack')">Attack</button>
+  <button id="defend" onclick="battleAction('defend')">Defend</button>
+</div>
+
+<div class="panel">
+  <h2>Adventure Log</h2>
+  <div id="log"></div>
+</div>
+
+<script>
+// DATA STORAGE: this constant lives in JavaScript memory and defines the board route.
+// Each entry is one stop; the index is a player's board position. It is read, not changed during play.
+const spaces = [
+  "start","coin","partner","coin","duel",
+  "coin","partner","coin","duel","coin",
+  "partner","coin","duel","coin"
+];
+
+// DISPLAY DATA: row/column coordinates control where spaces are drawn; they are not player progress.
+const positions = [
+  [1,1],[1,2],[1,3],[1,4],[1,5],
+  [2,5],[3,5],[4,5],[4,4],[4,3],
+  [4,2],[4,1],[3,1],[2,1]
+];
+
+// ALLY TEMPLATE DATA: possible ally definitions live here. Recruiting copies one into a player's partners array.
+const roster = [
+  {name:"Ember Fox",icon:"🦊",hp:7,atk:3},
+  {name:"Moss Golem",icon:"🪨",hp:10,atk:2},
+  {name:"Spark Sprite",icon:"⚡",hp:5,atk:4},
+  {name:"Cloud Cat",icon:"🐱",hp:6,atk:3},
+  {name:"Shell Knight",icon:"🐢",hp:8,atk:3},
+  {name:"Moon Owl",icon:"🦉",hp:6,atk:4}
+];
+
+// LIVE GAME STATE: held in this page's JavaScript memory only; there is no persistent save/database.
+let players = [];
+let turn = 0;
+let mode = "cpu";
+let busy = false;
+let gameOver = false;
+let battle = false;
+let cpuTimer = null;
+
+// Creates a fresh player record. These values are the starting state for a new game.
+function makePlayer(name, icon, pos, cpu) {
+  return {
+    name, icon, pos, cpu,
+    hp:12, maxHp:12, atk:3,
+    coins:5, partners:[], defending:false
+  };
+}
+
+// RULES UI: opens or closes the in-game instructions and updates the button's accessibility state.
+function toggleRules() {
+  const panel = document.getElementById("rulesPanel");
+  const button = document.getElementById("rulesButton");
+  const isHidden = panel.style.display === "none";
+  panel.style.display = isHidden ? "block" : "none";
+  button.setAttribute("aria-expanded", String(isHidden));
+  button.textContent = isHidden ? "✖ Hide Rules" : "📜 How to Play / Rules";
+}
+
+// GAME DATA CHANGES: resets live state and creates fresh player objects, so a new game starts over.
+function startGame() {
+  clearTimeout(cpuTimer);
+  mode = document.getElementById("mode").value;
+  players = [
+    makePlayer("Player 1","🧙",0,false),
+    makePlayer(mode === "cpu" ? "CPU Rival":"Player 2","🦸",7,mode === "cpu")
+  ];
+  turn = 0;
+  busy = false;
+  gameOver = false;
+  battle = false;
+  document.getElementById("battle").style.display = "none";
+  document.getElementById("roll").disabled = false;
+  document.getElementById("log").innerHTML = "";
+  say("Player 1, roll the dice!");
+  log("A new adventure begins!");
+  render();
+}
+
+function say(text) {
+  document.getElementById("status").textContent = text;
+}
+
+function log(text) {
+  const box = document.getElementById("log");
+  const entry = document.createElement("div");
+  entry.textContent = "• " + text;
+  box.prepend(entry);
+}
+
+// TEAM MATH: leader attack plus the attack values of all recruited allies.
+function teamAttack(p) {
+  return p.atk + p.partners.reduce((s,x)=>s+x.atk,0);
+}
+
+// TEAM MATH: leader HP plus the current HP of allies still on the team.
+function teamHP(p) {
+  return p.hp + p.partners.reduce((s,x)=>s+x.hp,0);
+}
+
+// SCREEN REFRESH: updates turn heading, disables unavailable actions, and refreshes stats/board.
+function render() {
+  document.getElementById("turnTitle").textContent =
+    gameOver ? "Adventure Complete" :
+    battle ? "Duel in Progress" : players[turn].name + "'s Turn";
+
+  document.getElementById("roll").disabled =
+    busy || battle || gameOver;
+
+  document.getElementById("stats").innerHTML = players.map((p,i)=>`
+    <div class="player">
+      <h3>${p.icon} ${p.name}</h3>
+      <p>❤️ Leader HP: ${p.hp}/${p.maxHp}</p>
+      <p>🪙 Coins: ${p.coins}</p>
+      <p>⚔ Attack: ${teamAttack(p)}</p>
+      <p>Team HP: ${teamHP(p)}</p>
+      <div>${p.partners.map(x=>x.icon+" "+x.name).join(" · ") || "No partners yet"}</div>
+    </div>
+  `).join("");
+
+  renderBoard();
+
+  if (battle) renderBattle();
+}
+
+// BOARD DRAWING: creates each space from the board data and places player icons at their positions.
+function renderBoard() {
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+
+  positions.forEach((pos,i)=>{
+    const type = spaces[i];
+    const div = document.createElement("div");
+    div.className = "space " +
+      (type === "coin" ? "coin" :
+       type === "partner" ? "partner" :
+       type === "duel" ? "duel" : "");
+
+    const icon = type === "coin" ? "🪙" :
+      type === "partner" ? "🤝" :
+      type === "duel" ? "⚔️" : "🏁";
+
+    const tokens = players
+      .filter(p=>p.pos===i)
+      .map(p=>p.icon).join(" ");
+
+    div.style.gridRow = pos[0];
+    div.style.gridColumn = pos[1];
+    div.innerHTML = `<span style="font-size:22px">${icon}</span>
+      <span>${type.toUpperCase()}</span>
+      <span class="token">${tokens}</span>`;
+    board.appendChild(div);
+  });
+
+  const center = document.createElement("div");
+  center.className = "center";
+  center.innerHTML = "<h2>✨ DUEL QUEST ✨</h2><p>Explore the board, recruit allies, and defeat your rival!</p>";
+  board.appendChild(center);
+}
+
+const wait = ms => new Promise(resolve=>setTimeout(resolve,ms));
+
+// ONE MOVE / DATA CHANGES: updates p.pos step by step, then may change p.coins or p.partners.
+// These changes mutate the current player object; renderBoard() displays the updated position.
+async function takeTurn() {
+  if (busy || battle || gameOver) return;
+  busy = true;
+
+  const p = players[turn];
+  const roll = 1 + Math.floor(Math.random()*6);
+
+  say(p.name + " rolled " + roll + "!");
+  log(p.name + " rolled " + roll + ".");
+
+  for(let i=0;i<roll;i++) {
+    p.pos = (p.pos+1)%spaces.length;
+    renderBoard();
+    await wait(180);
+  }
+
+  const type = spaces[p.pos];
+
+  if(type === "coin") {
+    const gain = 3+Math.floor(Math.random()*4);
+    p.coins += gain;
+    say(p.name+" collected "+gain+" coins!");
+    log(p.name+" collected coins.");
+  }
+
+  if(type === "partner") {
+    if(p.partners.length < 3) {
+      const base = roster[Math.floor(Math.random()*roster.length)];
+      p.partners.push({...base});
+      say(p.name+" recruited "+base.name+"!");
+      log(p.name+" recruited "+base.name+".");
+    } else {
+      p.coins += 5;
+      say("Team full! "+p.name+" found 5 coins.");
+    }
+  }
+
+  if(type === "duel") {
+    p.coins += 2;
+    say(p.name+" found 2 coins on a Duel Space!");
+  }
+
+  render();
+  await wait(400);
+  busy = false;
+
+  if(players[0].pos === players[1].pos) {
+    startBattle();
+    return;
+  }
+
+  nextTurn();
+}
+
+// TURN CONTROL: switches to the other player and automatically schedules the CPU when needed.
+function nextTurn() {
+  busy = false;
+  turn = 1-turn;
+  render();
+
+  if(players[turn].cpu && !gameOver && !battle) {
+    say("CPU is thinking...");
+    cpuTimer = setTimeout(takeTurn,800);
+  } else if(!gameOver) {
+    say(players[turn].name+", roll the dice!");
+  }
+}
+
+// BATTLE SETUP: records who attacks first, shows the battle panel, and prompts that fighter.
+function startBattle() {
+  battle = {attacker:turn,defender:1-turn};
+  players.forEach(p=>p.defending=false);
+  document.getElementById("battle").style.display = "block";
+  say("The rivals have met! Prepare for battle.");
+  log("A duel has begun!");
+  render();
+  document.getElementById("battle").scrollIntoView({behavior:"smooth",block:"nearest"});
+  battlePrompt();
+}
+
+function renderBattle() {
+  if(!battle) return;
+  const a=players[battle.attacker];
+  const d=players[battle.defender];
+
+  document.getElementById("arena").innerHTML=`
+    <h3>${a.icon} ${a.name} vs ${d.name} ${d.icon}</h3>
+    <p>${a.name}: ${a.hp} HP · Attack ${teamAttack(a)}</p>
+    <p>${d.name}: ${d.hp} HP · Attack ${teamAttack(d)}</p>`;
+}
+
+function battlePrompt() {
+  if(!battle) return;
+  const a=players[battle.attacker];
+
+  document.getElementById("battleStatus").textContent =
+    a.name+", choose your action.";
+
+  document.getElementById("attack").disabled = a.cpu || busy;
+  document.getElementById("defend").disabled = a.cpu || busy;
+
+  if(a.cpu) {
+    cpuTimer=setTimeout(()=>{
+      cpuTimer=null;
+      battleAction(Math.random()<0.8?"attack":"defend");
+    },800);
+  }
+}
+
+// COMBAT DATA CHANGES: may clear p.defending, subtract HP from ally objects, remove defeated allies
+// from p.partners, and reduce the leader's p.hp if damage remains.
+function damagePlayer(p,amount) {
+  if(p.defending) {
+    amount=Math.max(1,Math.ceil(amount/2));
+    p.defending=false;
+  }
+
+  while(amount>0 && p.partners.length) {
+    const ally=p.partners[0];
+    const hit=Math.min(ally.hp,amount);
+    ally.hp-=hit;
+    amount-=hit;
+
+    if(ally.hp<=0) {
+      log(ally.name+" was defeated!");
+      p.partners.shift();
+    }
+  }
+
+  if(amount>0) p.hp=Math.max(0,p.hp-amount);
+}
+
+// BATTLE DATA CHANGES: Attack calculates damage and calls damagePlayer(); Defend sets a.defending.
+// The attacker/defender values are then swapped unless a leader has been defeated.
+function battleAction(action) {
+  if(!battle || busy || gameOver) return;
+  if(cpuTimer) {
+    clearTimeout(cpuTimer);
+    cpuTimer=null;
+  }
+
+  busy=true;
+  const a=players[battle.attacker];
+  const d=players[battle.defender];
+
+  if(action==="defend") {
+    a.defending=true;
+    log(a.name+" is defending.");
+  } else {
+    const damage=Math.max(1,teamAttack(a)+Math.floor(Math.random()*3)-1);
+    damagePlayer(d,damage);
+    log(a.name+" dealt "+damage+" damage!");
+  }
+
+  if(d.hp<=0) {
+    gameOver=true;
+    battle=false;
+    busy=false;
+    document.getElementById("battle").style.display="none";
+    say("🏆 "+a.name+" wins the duel! Start a new game to play again.");
+    log(a.name+" won the game!");
+    render();
+    return;
+  }
+
+  const previous=battle.attacker;
+  battle.attacker=battle.defender;
+  battle.defender=previous;
+  busy=false;
+  render();
+  battlePrompt();
+}
+
+// MANUAL TEST PLAN (record actual outcomes after running these tests):
+// Test 1 — New game: choose "1 Player vs CPU" and click Start Game.
+// Expected: both players appear in Team Status, tokens appear on the board, and Player 1 can roll.
+//
+// Test 2 — Movement and space effects: roll several turns and observe the landing space.
+// Expected: the token advances 1–6 spaces; coin spaces award 3–6 coins; partner spaces recruit
+// an ally until the 3-ally limit (then award 5 coins); duel spaces award 2 coins.
+//
+// Test 3 — Rules and battle: open/close How to Play / Rules, then make both players meet
+// on the same space and try Attack and Defend.
+// Expected: rules show and hide; a battle begins on a shared space; actions alternate;
+// a defeated leader reaching 0 HP ends the game and announces the winner.
+//
+// AI HELP / CODE NOTE FOR SUBMISSION:
+// Complete this note honestly: "I used AI to help [describe the specific help]. I reviewed the
+// suggested changes by [describe how you checked them], tested [list tests actually run], and
+// changed [describe your own edits]." Do not claim tests passed until you have run them.
+startGame();
+</script>
+</body>
+</html>
