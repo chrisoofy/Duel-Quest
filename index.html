@@ -537,6 +537,51 @@ function battleAction(action, fromCPU = false) {
   battlePrompt();
 }
 
+
+// AUTOMATED RUBRIC CHECKS: each check uses setup data or temporary test objects.
+// The temporary objects are separate from `players`, so running tests does not alter a live game.
+function runGameChecks() {
+  const results = [];
+  const check = (name, test) => {
+    try {
+      if (!test()) throw new Error("Condition was false");
+      results.push({name, pass:true});
+    } catch (error) {
+      results.push({name, pass:false, detail:error.message});
+    }
+  };
+
+  check("1. Board has 14 playable spaces", () => spaces.length === 14);
+  check("2. Every board space has a display position", () => positions.length === spaces.length && positions.every(p => Array.isArray(p) && p.length === 2));
+  check("3. All three space types exist", () => ["coin","partner","duel"].every(type => spaces.includes(type)));
+  check("4. Ally roster has complete stat data", () => roster.length >= 3 && roster.every(a => a.name && a.icon && a.hp > 0 && a.atk > 0));
+  check("5. Team attack includes recruited allies", () => {
+    const sample = makePlayer("Test","🧪",0,false);
+    sample.partners = [{name:"Test Ally",icon:"⭐",hp:4,atk:2}];
+    return teamAttack(sample) === sample.atk + 2;
+  });
+  check("6. Damage hits allies before the leader", () => {
+    const sample = makePlayer("Test","🧪",0,false);
+    sample.partners = [{name:"Test Ally",icon:"⭐",hp:3,atk:1}];
+    damagePlayer(sample, 2);
+    return sample.partners[0].hp === 1 && sample.hp === sample.maxHp;
+  });
+
+  const list = document.getElementById("testResults");
+  list.replaceChildren();
+  results.forEach(result => {
+    const item = document.createElement("li");
+    item.textContent = (result.pass ? "PASS — " : "FAIL — ") + result.name + (result.detail ? " (" + result.detail + ")" : "");
+    list.appendChild(item);
+  });
+  const passed = results.filter(result => result.pass).length;
+  document.getElementById("testSummary").textContent = passed + " of " + results.length + " checks passed.";
+  log("Game Check Lab: " + passed + "/6 checks passed.");
+}
+
+// FIX NOTE: Invalid battle actions and off-turn human attempts are rejected by guards in
+// battleAction(). The check lab above also verifies ally damage without mutating the live match.
+
 // MANUAL TEST PLAN (record actual outcomes after running these tests):
 // Test 1 — New game: choose "1 Player vs CPU" and click Start Game.
 // Expected: both players appear in Team Status, tokens appear on the board, and Player 1 can roll.
