@@ -465,7 +465,7 @@ function battlePrompt() {
   if(a.cpu) {
     cpuTimer=setTimeout(()=>{
       cpuTimer=null;
-      battleAction(Math.random()<0.8?"attack":"defend");
+      battleAction(Math.random()<0.8?"attack":"defend", true);
     },800);
   }
 }
@@ -495,11 +495,11 @@ function damagePlayer(p,amount) {
 
 // BATTLE DATA CHANGES: Attack calculates damage and calls damagePlayer(); Defend sets a.defending.
 // The attacker/defender values are then swapped unless a leader has been defeated.
-function battleAction(action) {
+function battleAction(action, fromCPU = false) {
   // GUARD 2: only allow known actions during an active battle, one action at a time.
   if (!battle || busy || gameOver || !["attack","defend"].includes(action)) return;
   // GUARD 3: human controls cannot take an action for the CPU or out of turn.
-  if (players[battle.attacker].cpu) return;
+  if (players[battle.attacker].cpu && !fromCPU) return;
   if(cpuTimer) {
     clearTimeout(cpuTimer);
     cpuTimer=null;
