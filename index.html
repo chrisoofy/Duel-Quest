@@ -51,6 +51,11 @@ button, select {
   cursor: pointer;
 }
 button { background: #ffd166; font-weight: bold; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button:focus-visible, select:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+#directionsPanel { text-align: left; }
+#log { max-height: 180px; overflow-y: auto; text-align: left; }
+.notice { background: #151d38; border-left: 4px solid #ffd166; padding: 10px; border-radius: 6px; }
 .panel {
   max-width: 800px;
   margin: 16px auto;
@@ -116,8 +121,22 @@ button { background: #ffd166; font-weight: bold; }
     <option value="cpu">1 Player vs CPU</option>
     <option value="local">2 Local Players</option>
   </select>
-  <button onclick="startGame()">Start Game</button>
+  <button onclick="startGame()">Start / Restart Game</button>
   <button type="button" onclick="toggleRules()" aria-expanded="false" id="rulesButton">📜 How to Play / Rules</button>
+  <button type="button" onclick="toggleDirections()" aria-expanded="false" id="directionsButton">🧭 Quick Directions</button>
+</div>
+
+<div class="panel" id="directionsPanel" style="display:none;" aria-labelledby="directionsTitle">
+  <h2 id="directionsTitle">🧭 Quick Directions</h2>
+  <ol>
+    <li>Choose a game mode, then press <strong>Start / Restart Game</strong>.</li>
+    <li>On your turn, press <strong>Roll Dice &amp; Move</strong> once. Your token moves 1–6 spaces.</li>
+    <li>🪙 Coin spaces award coins; 🤝 Partner spaces recruit an ally (maximum 3); ⚔️ Duel spaces award 2 coins.</li>
+    <li>If both leaders land on the same space, use <strong>Attack</strong> or <strong>Defend</strong> when it is your battle turn.</li>
+    <li>Allies protect the leader by taking damage first. Defeat the rival leader to win.</li>
+    <li>Press <strong>Start / Restart Game</strong> at any time to reset the board, health, coins, allies, and log.</li>
+  </ol>
+  <p class="notice">Only the current player can act. Actions are disabled during movement, during the other fighter's turn, and after the game ends.</p>
 </div>
 
 <div class="panel" id="rulesPanel" style="display:none; text-align:left;" aria-labelledby="rulesTitle">
@@ -210,6 +229,16 @@ function makePlayer(name, icon, pos, cpu) {
   };
 }
 
+// DIRECTIONS UI: quick controls are separate from the full rules and never alter game state.
+function toggleDirections() {
+  const panel = document.getElementById("directionsPanel");
+  const button = document.getElementById("directionsButton");
+  const isHidden = panel.style.display === "none";
+  panel.style.display = isHidden ? "block" : "none";
+  button.setAttribute("aria-expanded", String(isHidden));
+  button.textContent = isHidden ? "✖ Hide Directions" : "🧭 Quick Directions";
+}
+
 // RULES UI: opens or closes the in-game instructions and updates the button's accessibility state.
 function toggleRules() {
   const panel = document.getElementById("rulesPanel");
@@ -222,7 +251,9 @@ function toggleRules() {
 
 // GAME DATA CHANGES: resets live state and creates fresh player objects, so a new game starts over.
 function startGame() {
+  // Restart cancels any pending CPU action so an old turn cannot affect the new game.
   clearTimeout(cpuTimer);
+  cpuTimer = null;
   mode = document.getElementById("mode").value;
   players = [
     makePlayer("Player 1","🧙",0,false),
@@ -233,6 +264,9 @@ function startGame() {
   gameOver = false;
   battle = false;
   document.getElementById("battle").style.display = "none";
+  document.getElementById("battleStatus").textContent = "";
+  document.getElementById("attack").disabled = true;
+  document.getElementById("defend").disabled = true;
   document.getElementById("roll").disabled = false;
   document.getElementById("log").innerHTML = "";
   say("Player 1, roll the dice!");
@@ -326,7 +360,8 @@ const wait = ms => new Promise(resolve=>setTimeout(resolve,ms));
 // ONE MOVE / DATA CHANGES: updates p.pos step by step, then may change p.coins or p.partners.
 // These changes mutate the current player object; renderBoard() displays the updated position.
 async function takeTurn() {
-  if (busy || battle || gameOver) return;
+  // GUARD 1: block wrong-phase actions and repeated clicks while a move is resolving.
+  if (busy || battle || gameOver || players.length !== 2) return;
   busy = true;
 
   const p = players[turn];
@@ -365,6 +400,7 @@ async function takeTurn() {
   if(type === "duel") {
     p.coins += 2;
     say(p.name+" found 2 coins on a Duel Space!");
+    log(p.name+" found 2 coins on a Duel Space.");
   }
 
   render();
@@ -423,8 +459,8 @@ function battlePrompt() {
   document.getElementById("battleStatus").textContent =
     a.name+", choose your action.";
 
-  document.getElementById("attack").disabled = a.cpu || busy;
-  document.getElementById("defend").disabled = a.cpu || busy;
+  document.getElementById("attack").disabled = a.cpu || busy || gameOver;
+  document.getElementById("defend").disabled = a.cpu || busy || gameOver;
 
   if(a.cpu) {
     cpuTimer=setTimeout(()=>{
@@ -460,7 +496,10 @@ function damagePlayer(p,amount) {
 // BATTLE DATA CHANGES: Attack calculates damage and calls damagePlayer(); Defend sets a.defending.
 // The attacker/defender values are then swapped unless a leader has been defeated.
 function battleAction(action) {
-  if(!battle || busy || gameOver) return;
+  // GUARD 2: only allow known actions during an active battle, one action at a time.
+  if (!battle || busy || gameOver || !["attack","defend"].includes(action)) return;
+  // GUARD 3: human controls cannot take an action for the CPU or out of turn.
+  if (players[battle.attacker].cpu) return;
   if(cpuTimer) {
     clearTimeout(cpuTimer);
     cpuTimer=null;
